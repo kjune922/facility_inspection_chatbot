@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('AI 챗봇')}"></head><body>
+<a href="#main" class="skip-link">본문으로 이동</a><aside th:replace="~{fragments/layout :: sidebar('chat')}"></aside>
+<div class="app-shell"><header th:replace="~{fragments/layout :: topbar('AI 챗봇')}"></header>
+<main id="main" class="main-content chat-main">
+<div class="page-heading"><div><p class="eyebrow">YOUR LOCAL INSPECTION ASSISTANT</p><h1>기록을 함께 읽는 AI</h1><p class="page-description">궁금한 내용을 물어보세요. 이 시설의 점검일지를 찾아 답합니다.</p></div><a class="btn btn-secondary" th:href="@{/}">대시보드로</a></div>
+<div class="chat-layout"><aside class="chat-context panel"><div class="panel-heading"><div><h2>어느 시설을 살펴볼까요?</h2><p>시설을 선택하면 대화를 이어갈 수 있습니다.</p></div></div>
+<form class="panel-body" th:action="@{/chat}" method="get"><label for="facility-picker">대상 시설</label><select id="facility-picker" name="facilityId" required><option value="">시설 선택</option><option th:each="f : ${facilities}" th:value="${f.id}" th:text="${f.name}" th:selected="${facility != null and facility.id == f.id}"></option></select><button class="btn btn-primary full-width" type="submit">대화 열기</button></form>
+<div class="context-note"><span class="badge neutral">LOCAL AI</span><p th:text="${modelName}"></p><p>선택한 시설의 최신 최대 10건을 조회합니다. 긴 기록은 입력 길이에 따라 건수가 줄어듭니다. 기간·검색어로 범위를 좁힐 수 있습니다.</p><p>같은 시설의 최근 대화 4개를 맥락으로 사용합니다.</p></div>
+<a class="context-link" th:href="@{/inspections}">점검일지 조회 →</a><a class="context-link" th:href="@{/inspections/new}">새 점검일지 등록 →</a></aside>
+<section class="chat-workspace" aria-label="시설별 대화">
+<div th:if="${facility == null}" class="chat-welcome panel"><div class="chat-orb">✦</div><h2>시설의 기록에서 시작하세요.</h2><p>왼쪽에서 시설을 선택한 뒤 질문을 입력하세요.</p><div class="example-grid"><span>최근 점검 내용을 요약해줘</span><span>기록상 주의할 부분이 있어?</span><span>누수에 어떤 조치를 했어?</span></div><a th:if="${#lists.isEmpty(facilities)}" class="btn btn-primary" th:href="@{/facilities/new}">첫 시설 등록하기</a></div>
+<th:block th:if="${facility != null}">
+<div class="chat-facility-header"><div><h2 th:text="${facility.name}"></h2><p th:text="${facility.location}"></p></div><span class="badge neutral">시설별 대화</span></div>
+<p class="chat-disclaimer">저장된 점검 기록에 대한 AI 참고 의견입니다. 현재 실측 상태나 확정 판정과 다를 수 있습니다.</p>
+<div th:if="${histories.empty}" class="chat-welcome panel"><div class="chat-orb">✦</div><h2>이 시설에 대해 무엇이 궁금하세요?</h2><p>“최근 점검 내용으로 볼 때 주의할 점을 정리해줘”처럼 질문해 보세요.</p></div>
+<div class="chat-feed" th:if="${!histories.empty}">
+<article class="chat-turn" th:each="h : ${histories.content}" th:id="'answer-' + ${h.id}">
+<div class="chat-user"><span class="message-label">나의 질문</span><p th:text="${h.question}"></p></div>
+<div class="chat-assistant panel"><div class="answer-heading"><strong>✦ WaterAPI</strong><small th:text="${#temporals.format(h.createdAt, 'yyyy-MM-dd HH:mm')}"></small></div>
+<p class="answer-scope"><span th:text="${h.answerModel == null ? '기존 기록 조회 · AI 미연결' : h.answerModel}"></span> · 조건 일치 <span th:text="${h.matchedCount}"></span>건 중 최신 <span th:text="${#lists.size(h.evidence)}"></span>건 기준</p>
+<div class="record-content chat-answer" th:text="${h.answer}"></div>
+<details class="chat-sources"><summary>참고한 점검 기록 <span th:text="${#lists.size(h.evidence)}"></span>건</summary><div class="source-item" th:each="e : ${h.evidence}"><strong th:text="'점검 #' + ${e.inspectionId}"></strong><small th:text="${e.inspectionDate}"></small><p th:text="${e.content}"></p></div><p class="field-hint">답변 당시 복사본입니다. 원본 수정·삭제 후에도 유지됩니다.</p></details>
+<div class="chat-downloads"><span>답변 + 근거 저장</span><a class="btn btn-secondary btn-sm" th:href="@{/chat/{id}/download(id=${h.id},facilityId=${facility.id},format='txt')}">TXT ↓</a><a class="btn btn-secondary btn-sm" th:href="@{/chat/{id}/download(id=${h.id},facilityId=${facility.id},format='csv')}">CSV ↓</a><a class="btn btn-secondary btn-sm" th:href="@{/chat/{id}/download(id=${h.id},facilityId=${facility.id},format='html')}">HTML ↓</a></div></div></article></div>
+<nav class="pagination" aria-label="대화 페이지"><a th:if="${histories.hasPrevious()}" class="btn btn-secondary btn-sm" th:href="@{/chat(facilityId=${facility.id},page=${histories.number - 1})}">더 최근 대화</a><span th:text="'페이지 ' + ${histories.number + 1}"></span><a th:if="${histories.hasNext()}" class="btn btn-secondary btn-sm" th:href="@{/chat(facilityId=${facility.id},page=${histories.number + 1})}">이전 대화</a></nav>
+<form id="chat-form" class="chat-composer panel" th:action="@{/chat(facilityId=${facility.id})}" th:object="${questionForm}" method="post">
+<div th:if="${aiError != null}" role="alert" class="chat-error" th:text="${aiError}"></div>
+<label for="question">이 시설에 질문하기</label><textarea id="question" th:field="*{question}" rows="3" maxlength="500" required placeholder="예: 최근 점검을 요약하고, 기록상 주의할 점을 알려줘"></textarea><p class="field-error" th:if="${#fields.hasErrors('question')}" th:errors="*{question}"></p>
+<details class="chat-filters"><summary>참고 기록 범위 설정</summary><div class="chat-filter-grid"><div><label for="fromDate">시작일</label><input id="fromDate" type="date" th:field="*{fromDate}"><p class="field-error" th:if="${#fields.hasErrors('fromDate')}" th:errors="*{fromDate}"></p></div><div><label for="toDate">종료일</label><input id="toDate" type="date" th:field="*{toDate}"><p class="field-error" th:if="${#fields.hasErrors('toDate')}" th:errors="*{toDate}"></p></div><div><label for="keyword">점검 내용 검색어</label><input id="keyword" type="text" th:field="*{keyword}" maxlength="100" placeholder="예: 누수"><p class="field-error" th:if="${#fields.hasErrors('keyword')}" th:errors="*{keyword}"></p></div></div></details>
+<div class="composer-bottom"><small id="send-status" role="status">AI가 내부 기록을 읽습니다. 응답에 시간이 걸릴 수 있어요.</small><button id="send-button" class="btn btn-primary" type="submit">질문 보내기 ↑</button></div></form>
+</th:block></section></div></main><footer th:replace="~{fragments/layout :: footer}"></footer></div>
+<script>const form=document.getElementById('chat-form');if(form){form.addEventListener('submit',function(){const button=document.getElementById('send-button');button.disabled=true;button.textContent='기록을 읽고 있어요…';document.getElementById('send-status').textContent='로컬 AI가 답변을 작성 중입니다. 최대 3분 정도 기다려 주세요.';});}window.addEventListener('pageshow',function(){const button=document.getElementById('send-button');if(button){button.disabled=false;button.textContent='질문 보내기 ↑';}});</script>
+</body></html>

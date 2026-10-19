@@ -1,0 +1,222 @@
+package com.kjune922.waterapi.analysis;
+
+import com.kjune922.waterapi.client.InspectionAiClient;
+import com.kjune922.waterapi.domain.RiskLevel;
+import com.kjune922.waterapi.dto.InspectionAnalysisResponse;
+import com.kjune922.waterapi.facility.Facility;
+import com.kjune922.waterapi.facility.FacilityType;
+import com.kjune922.waterapi.inspection.InspectionReport;
+import com.kjune922.waterapi.inspection.InspectionReportRepository;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.*;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+
+@ExtendWith(MockitoExtension.class)
+class AiAnalysisServiceTest {
+
+    @Mock
+    private InspectionReportRepository inspectionReportRepository;
+
+    @Mock
+    private AiAnalysisRepository aiAnalysisRepository;
+
+    @Mock
+    private InspectionAiClient inspectionAiClient;
+
+    @InjectMocks
+    private AiAnalysisService aiAnalysisService;
+
+    @Test
+    void 점검일지를_AI로_분석하고_결과를_저장한다() {
+        Facility facility = new Facility(
+                "2번 펌프",
+                FacilityType.PUMP,
+                "청주 정수장"
+        );
+
+        InspectionReport inspectionReport = new InspectionReport(
+                facility,
+                "펌프 진동이 크고 압력이 감소했습니다.",
+                LocalDate.of(2026, 9, 11)
+        );
+
+        InspectionAnalysisResponse response =
+                new InspectionAnalysisResponse(
+                        "펌프 진동과 압력 저하가 확인됨",
+                        "PUMP_ABNORMALITY",
+                        RiskLevel.WARNING,
+                        "베어링과 흡입구를 점검하세요."
+                );
+
+        given(inspectionReportRepository.findById(1L))
+                .willReturn(Optional.of(inspectionReport));
+
+        given(aiAnalysisRepository
+                .existsByInspectionReportId(1L))
+                .willReturn(false);
+
+        given(inspectionAiClient.analyze(
+                inspectionReport.getContent()
+        )).willReturn(response);
+
+        given(aiAnalysisRepository.save(any(AiAnalysis.class)))
+                .willAnswer(org.mockito.AdditionalAnswers.returnsFirstArg());
+
+        AiAnalysis result =
+                aiAnalysisService.analyzeInspection(1L);
+
+        assertThat(result.getInspectionReport())
+                .isEqualTo(inspectionReport);
+        assertThat(result.getSummary())
+                .isEqualTo("펌프 진동과 압력 저하가 확인됨");
+        assertThat(result.getAbnormalityType())
+                .isEqualTo("PUMP_ABNORMALITY");
+        assertThat(result.getRiskLevel())
+                .isEqualTo(RiskLevel.WARNING);
+        assertThat(result.getRecommendedAction())
+                .isEqualTo("베어링과 흡입구를 점검하세요.");
+        assertThat(result.getAnalyzedAt()).isNotNull();
+
+        verify(inspectionAiClient)
+                .analyze(inspectionReport.getContent());
+        verify(aiAnalysisRepository)
+                .save(any(AiAnalysis.class));
+    }
+
+    @Test
+    void 이미_분석된_점검일지는_다시_분석할_수_없다() {
+        Facility facility = new Facility(
+                "2번 펌프",
+                FacilityType.PUMP,
+                "청주 정수장"
+        );
+
+        InspectionReport inspectionReport = new InspectionReport(
+                facility,
+                "펌프 진동이 큽니다.",
+                LocalDate.of(2026, 9, 11)
+        );
+
+        given(inspectionReportRepository.findById(1L))
+                .willReturn(Optional.of(inspectionReport));
+
+        given(aiAnalysisRepository
+                .existsByInspectionReportId(1L))
+                .willReturn(true);
+
+        assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
+            @Override
+            public void call() throws Throwable {
+                aiAnalysisService.analyzeInspection(1L);
+            }
+        })
+                .isInstanceOf(com.kjune922.waterapi.exception.DuplicateAnalysisException.class)
+                .hasMessage(
+                        "이미 AI 분석이 완료된 점검일지입니다."
+                );
+
+        verifyNoInteractions(inspectionAiClient);
+        verify(aiAnalysisRepository, never())
+                .save(any(AiAnalysis.class));
+    }
+
+    @Test
+    void 존재하지_않는_점검일지는_분석할_수_없다() {
+        given(inspectionReportRepository.findById(999L))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
+            @Override
+            public void call() throws Throwable {
+                aiAnalysisService.analyzeInspection(999L);
+            }
+        })
+                .isInstanceOf(com.kjune922.waterapi.exception.ResourceNotFoundException.class)
+                .hasMessage("점검일지를 찾을 수 없습니다.");
+
+        verifyNoInteractions(inspectionAiClient);
+        verifyNoInteractions(aiAnalysisRepository);
+    }
+
+    @Test
+    void 위험도로_AI분석_결과_조회() {
+        given(aiAnalysisRepository.findAllByRiskLevel(RiskLevel.WARNING))
+                .willReturn(List.of());
+
+        List<AiAnalysis> result = aiAnalysisService.findAnalysisByRiskLevel(RiskLevel.WARNING);
+
+        assertThat(result).isEmpty();
+
+        verify(aiAnalysisRepository).findAllByRiskLevel(RiskLevel.WARNING);
+    }
+
+    @Test
+    void 위험도_조건이_없으면_AI분석_결과를_전체조회한다() {
+        given(aiAnalysisRepository.findAll())
+                .willReturn(List.of());
+
+        List<AiAnalysis> result =
+                aiAnalysisService.findAnalysisByRiskLevel(null);
+
+        assertThat(result).isEmpty();
+
+        verify(aiAnalysisRepository).findAll();
+        verify(aiAnalysisRepository, never())
+                .findAllByRiskLevel(any());
+    }
+
+    @Test
+    @DisplayName("위험도 조건이 없으면 AI분석 결과를 페이지로 전체조회")
+    void NonRiskLevelFindAll() {
+        Pageable pageable = PageRequest.of(0,10);
+
+        Page<AiAnalysis> page = new PageImpl<>(List.of());
+
+        given(aiAnalysisRepository.findAll(pageable))
+                .willReturn(page);
+
+        Page<AiAnalysis> result = aiAnalysisService.findAnalysisPage(null,pageable);
+
+        assertThat(result).isEmpty();
+
+        verify(aiAnalysisRepository).findAll(pageable);
+        verify(aiAnalysisRepository, never())
+                .findAllByRiskLevel(any(RiskLevel.class), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("위험도 조건이 있으면 AI분석 결과를 페이지 조회")
+    void PageReadByRiskLevel() {
+        Pageable pageable = PageRequest.of(0,10);
+        Page<AiAnalysis> page = new PageImpl<>(List.of());
+
+        given(aiAnalysisRepository.findAllByRiskLevel(RiskLevel.WARNING, pageable))
+                .willReturn(page);
+
+        Page<AiAnalysis> result = aiAnalysisService.findAnalysisPage(RiskLevel.WARNING, pageable);
+
+        assertThat(result).isEmpty();
+
+        verify(aiAnalysisRepository).findAllByRiskLevel(RiskLevel.WARNING, pageable);
+
+        verify(aiAnalysisRepository, never()).findAll(any(Pageable.class));
+    }
+}

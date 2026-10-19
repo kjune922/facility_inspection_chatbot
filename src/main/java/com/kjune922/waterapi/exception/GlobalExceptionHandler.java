@@ -1,0 +1,99 @@
+package com.kjune922.waterapi.exception;
+
+import com.kjune922.waterapi.facility.Facility;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+import java.time.LocalDateTime;
+
+@ControllerAdvice(annotations = Controller.class)
+public class GlobalExceptionHandler {
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public String handleNotFound(ResourceNotFoundException exception, HttpServletRequest request, Model model) {
+        log.warn("요청한 리소스를 찾을 수 없음: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage());
+
+        addErrorAttributes(model,request,HttpStatus.NOT_FOUND, exception.getMessage());
+
+        return "error/error";
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(DuplicateAnalysisException.class)
+    public String handleDuplicateAnalysis(
+            DuplicateAnalysisException exception,
+            HttpServletRequest request,
+            Model model
+    ) {
+        log.warn(
+                "중복 AI 분석 요청: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        addErrorAttributes(
+                model,
+                request,
+                HttpStatus.CONFLICT,
+                exception.getMessage()
+        );
+
+        return "error/error";
+    }
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(IllegalArgumentException.class)
+    public String handleBadRequest(
+            IllegalArgumentException exception,
+            HttpServletRequest request,
+            Model model
+    ) {
+        log.warn(
+                "잘못된 요청: path={}, message={}",
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        addErrorAttributes(
+                model,
+                request,
+                HttpStatus.BAD_REQUEST,
+                exception.getMessage()
+        );
+
+        return "error/error";
+    }
+
+    private void addErrorAttributes(
+            Model model,
+            HttpServletRequest request,
+            HttpStatus status,
+            String message
+    ) {
+        model.addAttribute("timestamp", LocalDateTime.now());
+        model.addAttribute("status", status.value());
+        model.addAttribute("error", status.getReasonPhrase());
+        model.addAttribute("message", message);
+        model.addAttribute("path", request.getRequestURI());
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(FacilityInUseException.class)
+    public String handleFacilityInUse(FacilityInUseException exception, HttpServletRequest request, Model model) {
+        log.warn("사용 중인 시설 삭제 요청: path={}, message={}", request.getRequestURI(), exception.getMessage());
+
+        addErrorAttributes(model, request, HttpStatus.CONFLICT, exception.getMessage());
+
+        return "error/error";
+    }
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+}
